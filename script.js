@@ -1,232 +1,96 @@
 const pup = require("puppeteer");
-let {id,pass} = require("./secret");
-let tab;
+let { id, pass } = require("./secret");
 let dataFile = require("./data");
 
-async function main(){
+async function main() {
+    const browser = await pup.launch({
+        headless: false,
+        defaultViewport: null,
+        args: ["--start-maximized"],
+    });
 
-        let browser = await pup.launch({
-            headless : false,
-            defaultViewport : false,
-            args : ["--start-maximized"]
-        });
+    const pages = await browser.pages();
+    const page = pages[0];
 
-        let pages = await browser.pages();
-        tab = pages[0];
-        await tab.goto("https://internshala.com/");
-        await tab.click(".btn.btn-secondary.home_page_login_button")
-        await tab.type("#modal_email", id);
-        await tab.type("#modal_password", pass);
-        await tab.click("#modal_login_submit");
+    console.log("Navigating to Internshala...");
+    await page.goto("https://internshala.com/", { waitUntil: "networkidle2" });
 
-         await tab.waitForNavigation({waitUntil : "networkidle2"});
-        await tab.click(".nav-link.dropdown-toggle.profile_container .is_icon_header.ic-24-filled-down-arrow");
+    console.log("Waiting for login button...");
+    await page.waitForSelector(".login-cta", { visible: true });
+    console.log("Login button appeared!");
 
-         let profile_options = await tab.$$(".profile_options a");
-         let app_urls = [];
-         for(let i=0; i<11; i++){
-            let url = await tab.evaluate(function(ele){
-                    return ele.getAttribute("href");                                 
-            }, profile_options[i]); 
-            app_urls.push(url);    
-        }                                              
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 2000);
-        });
-        tab.goto("https://internshala.com"+app_urls[1]);
+    await page.click(".login-cta");
 
-        await tab.waitForSelector("#graduation-tab .ic-16-plus", {visible : true});
-        await tab.click("#graduation-tab .ic-16-plus");
-        await graduation(dataFile[0]);
+    console.log("Waiting for login modal...");
+    await page.waitForSelector("#modal_email", { visible: true });
+    console.log("Login modal appeared!");
 
-        await new Promise(function(resolve,reject){                              
-            return setTimeout(resolve, 1000);
-        });
+    // Fill in login details
+    await page.type("#modal_email", id);
+    await page.type("#modal_password", pass);
+    await page.click("#modal_login_submit");
 
-        await tab.waitForSelector(".next-button", {visible : true});
-        await tab.click(".next-button");
+    // Add a delay before waiting for navigation
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for 5 seconds
 
-        await training(dataFile[0]);
+    await page.waitForNavigation({ waitUntil: "networkidle2" });
 
-        await new Promise(function(resolve,reject){                              
-            return setTimeout(resolve, 1000);
-        });
+    console.log("Navigating to internships page...");
+    await page.goto("https://internshala.com/internships", { waitUntil: "networkidle2" });
 
-        await tab.waitForSelector(".next-button", {visible : true});
-        await tab.click(".next-button");
+    // Wait for internship listings to load
+    console.log("Waiting for internship listings...");
+    await page.waitForSelector(".internship_meta .view_detail_button", { visible: true });
 
-        await tab.waitForSelector(".btn.btn-secondary.skip.skip-button", {visible : true});
-        await tab.click(".btn.btn-secondary.skip.skip-button");
+    // Get URLs of the first few internships
+    let internshipLinks = await page.$$eval(".internship_meta .view_detail_button", links => 
+        links.map(link => link.getAttribute("href"))
+    );
+    
+    console.log("Found internship listings:", internshipLinks);
 
-        await workSample(dataFile[0]);
-
-        await new Promise(function(resolve,reject){                              
-            return setTimeout(resolve, 1000);
-        });
-
-        await tab.waitForSelector("#save_work_samples", {visible : true});
-        await tab.click("#save_work_samples");
-       
-        // await tab.waitForSelector(".resume_download_mobile", {visible : true});
-        // await tab.click(".resume_download_mobile");                                // if you want to download resume.
-        
-        await new Promise(function(resolve,reject){                              
-            return setTimeout(resolve, 1000);
-        });
-        await application(dataFile[0]);
+    // Apply to the first 3 internships
+    for (let i = 0; i < Math.min(3, internshipLinks.length); i++) {
+        let internshipUrl = internshipLinks[i]; // Use the link directly
+        console.log(`Applying to internship: ${internshipUrl}`);
+        await applyToInternship(page, internshipUrl, dataFile[0]);
     }
 
-    async function graduation(data){
-        await tab.waitForSelector("#degree_completion_status_pursuing", {visible : true});
-        await tab.click("#degree_completion_status_pursuing");
+    await browser.close();
+}
 
-        await tab.waitForSelector("#college", {visible : true});
-        await tab.type("#college", data["College"]);
+async function applyToInternship(page, internshipUrl, data) {
+    // Navigate to the internship detail page
+    await page.goto(internshipUrl, { waitUntil: "networkidle2" });
 
-        await tab.waitForSelector("#start_year_chosen", {visible : true});
-        await tab.click("#start_year_chosen");
-        await tab.waitForSelector(".active-result[data-option-array-index='5']", {visible : true});
-        await tab.click(".active-result[data-option-array-index='5']");
+    // Click the "Apply Now" button
+    await page.waitForSelector(".btn.btn-large", { visible: true });
+    await page.click(".btn.btn-large");
 
-        await tab.waitForSelector("#end_year_chosen", {visible : true});
-        await tab.click('#end_year_chosen');
-        await tab.waitForSelector("#end_year_chosen .active-result[data-option-array-index = '6']", {visible : true});
-        await tab.click("#end_year_chosen .active-result[data-option-array-index = '6']");
-        
-        await tab.waitForSelector("#degree", {visible : true});
-        await tab.type("#degree", data["Degree"]);
+    // Wait for application form to appear
+    await page.waitForSelector("#application_button", { visible: true });
+    await page.click("#application_button");
 
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 1000);
-        });
-        await tab.waitForSelector("#stream", {visible : true});
-        await tab.type("#stream", data["Stream"]);
+    // Fill in application details (e.g., Why should they hire you, etc.)
+    let answers = await page.$$(".textarea.form-control");
 
-        await new Promise(function(resolve,reject){                           
-            return setTimeout(resolve, 1000);
-        });
-        await tab.waitForSelector("#performance-college", {visible : true});
-        await tab.type("#performance-college", data["Percentage"]);
-
-        await new Promise(function(resolve,reject){                              
-            return setTimeout(resolve, 1000);
-        });
-
-        await tab.click("#college-submit");
-
-    }
-
-    async function training(data){
-        await tab.waitForSelector(".experiences-tabs[data-target='#training-modal'] .ic-16-plus", {visible : true});
-        await tab.click(".experiences-tabs[data-target='#training-modal'] .ic-16-plus");
-
-        await tab.waitForSelector("#other_experiences_course", {visible : true});
-        await tab.type("#other_experiences_course", data["Training"]);
-
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 1000);
-        });
-
-        await tab.waitForSelector("#other_experiences_organization", {visible : true});
-        await tab.type("#other_experiences_organization", data["Organization"]);
-
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 1000);
-        });
-
-        await tab.click("#other_experiences_location_type_label");
-
-        await tab.click("#other_experiences_start_date");
-
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 1000);
-        });
-        
-        await tab.waitForSelector(".ui-state-default[href='#']", {visible : true});
-        let date = await tab.$$(".ui-state-default[href='#']");
-        await date[0].click();
-        await tab.click("#other_experiences_is_on_going");
-
-        await tab.waitForSelector("#other_experiences_training_description", {visible : true});
-        await tab.type("#other_experiences_training_description", data["description"]);
-
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 2000);
-        });
-
-        await tab.click("#training-submit");
-        
-    }
-
-    async function workSample(data){
-        await tab.waitForSelector("#other_portfolio_link", {visible : true});
-        await tab.type("#other_portfolio_link", data["link"]);
-    }
-
-    async function application(data){
-        
-        await tab.goto("https://internshala.com/the-grand-summer-internship-fair");
-
-        await tab.waitForSelector(".btn.btn-primary.campaign-btn.view_internship", {visible : true});
-        await tab.click(".btn.btn-primary.campaign-btn.view_internship")
-        
-        await new Promise(function(resolve,reject){                             
-            return setTimeout(resolve, 2000);
-        });
-        await tab.waitForSelector(".view_detail_button", {visible : true});
-        let details = await tab.$$(".view_detail_button");
-        let detailUrl = [];
-        for(let i=0; i<3; i++){
-            let url = await tab.evaluate(function(ele){
-                    return ele.getAttribute("href");                                 
-            }, details[i]); 
-            detailUrl.push(url);    
-        }
-        
-        for(let i of detailUrl){
-            await apply(i, data);
-            await new Promise(function(resolve,reject){                             
-                return setTimeout(resolve, 1000);
-            });
-        }
-
-    }
-
-    async function apply(url, data){
-        await tab.goto("https://internshala.com"+url);
-        
-        await tab.waitForSelector(".btn.btn-large", {visible : true});
-        await tab.click(".btn.btn-large");
-
-        await tab.waitForSelector("#application_button", {visible : true});
-        await tab.click("#application_button");
-
-        await tab.waitForSelector(".textarea.form-control", {visible : true});
-        let ans = await tab.$$(".textarea.form-control");
-
-        for(let i=0; i<ans.length ; i++){
-            if(i==0){
-                await ans[i].type(data["hiringReason"]);
-                await new Promise(function(resolve,reject){                             
-                    return setTimeout(resolve, 1000);
-                });
+    if (answers.length > 0) {
+        console.log("Filling application form...");
+        await answers[0].type(data["hiringReason"]);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second
+        if (answers.length > 1) {
+            await answers[1].type(data["availability"]);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second
+            if (answers.length > 2) {
+                await answers[2].type(data["rating"]);
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second
             }
-            else if(i==1){
-                await ans[i].type(data["availability"]);
-                await new Promise(function(resolve,reject){                             
-                    return setTimeout(resolve, 1000);
-                });
-            }
-            else{
-                await ans[i].type(data["rating"]);
-                await new Promise(function(resolve,reject){                             
-                    return setTimeout(resolve, 1000);
-                });
-            } 
         }
 
-           await tab.click(".submit_button_container");
-
+        // Submit the application
+        await page.click(".submit_button_container");
+        console.log("Application submitted successfully!");
     }
+}
 
 main();
